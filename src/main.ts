@@ -4,6 +4,10 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div style="max-width: 800px; margin: auto;">
     <h1>Ant Colony Simulator</h1>
     <div style="margin-bottom: 1em;">
+      <label>Simulation Speed: <input id="speed-slider" type="range" min="0" max="4" value="0" style="width: 200px;" /></label>
+      <span id="speed-display" style="margin-left: 0.5em; font-weight: bold;">1x</span>
+    </div>
+    <div style="margin-bottom: 1em;">
       <label>Number of Ants: <input id="num-ants" type="number" min="1" max="500" value="50" /></label>
       <label style="margin-left: 1em;">Number of Food Sources: <input id="num-food" type="number" min="1" max="10" value="3" /></label>
       <label style="margin-left: 1em;">Number of Obstacles: <input id="num-obstacles" type="number" min="0" max="20" value="2" /></label>
@@ -27,6 +31,18 @@ let showPheromones = true;
 const pheromoneToggle = document.getElementById('pheromone-toggle') as HTMLInputElement;
 pheromoneToggle.addEventListener('change', () => {
   showPheromones = pheromoneToggle.checked;
+});
+
+// Speed control
+let simulationSpeed = 1;
+const speedValues = [1, 2, 3, 5, 10];
+const speedSlider = document.getElementById('speed-slider') as HTMLInputElement;
+const speedDisplay = document.getElementById('speed-display') as HTMLSpanElement;
+
+speedSlider.addEventListener('input', () => {
+  const index = parseInt(speedSlider.value, 10);
+  simulationSpeed = speedValues[index];
+  speedDisplay.textContent = `${simulationSpeed}x`;
 });
 
 type Pheromone = { x: number; y: number; strength: number; type: 'home' | 'food' };
@@ -637,8 +653,11 @@ function updatePheromones() {
 }
 
 function animate(ctx: CanvasRenderingContext2D) {
-  updateAnts();
-  updatePheromones();
+  // Run simulation logic multiple times based on speed setting
+  for (let i = 0; i < simulationSpeed; i++) {
+    updateAnts();
+    updatePheromones();
+  }
   drawWorld(ctx);
   animationId = requestAnimationFrame(() => animate(ctx));
 }
