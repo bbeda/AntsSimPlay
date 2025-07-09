@@ -1,7 +1,4 @@
 import './style.css'
-import typescriptLogo from './typescript.svg'
-import viteLogo from '/vite.svg'
-import { setupCounter } from './counter.ts'
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div style="max-width: 800px; margin: auto;">
@@ -9,8 +6,11 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <div style="margin-bottom: 1em;">
       <label>Number of Ants: <input id="num-ants" type="number" min="1" max="500" value="50" /></label>
       <label style="margin-left: 1em;">Number of Food Sources: <input id="num-food" type="number" min="1" max="10" value="3" /></label>
-      <label style="margin-left: 1em;">Number of Obstacles: <input id="num-obstacles" type="number" min="0" max="20" value="2" /></label>
       <button id="start-sim">Start Simulation</button>
+    </div>
+    <div style="margin-bottom: 1em;">
+      <label>Simulation Speed: <input id="speed-slider" type="range" min="0" max="4" value="0" style="margin: 0 10px;" /></label>
+      <span id="speed-display">1x</span>
     </div>
     <div style="margin-bottom: 1em;">
       <label><input id="debug-toggle" type="checkbox" /> Show Debug Info</label>
@@ -32,13 +32,20 @@ pheromoneToggle.addEventListener('change', () => {
   showPheromones = pheromoneToggle.checked;
 });
 
+// Speed control
+const speedMultipliers = [1, 2, 3, 5, 10];
+let currentSpeedMultiplier = 1;
+const speedSlider = document.getElementById('speed-slider') as HTMLInputElement;
+const speedDisplay = document.getElementById('speed-display') as HTMLSpanElement;
+
+speedSlider.addEventListener('input', () => {
+  const speedIndex = parseInt(speedSlider.value, 10);
+  currentSpeedMultiplier = speedMultipliers[speedIndex];
+  speedDisplay.textContent = `${currentSpeedMultiplier}x`;
+});
+
 type Pheromone = { x: number; y: number; strength: number; type: 'home' | 'food' };
 type FoodSource = { x: number; y: number; amount: number };
-type Obstacle = {
-  x: number;
-  y: number;
-  radius: number; // For now, obstacles are circles
-};
 type Ant = {
   x: number;
   y: number;
@@ -60,10 +67,7 @@ const ANT_RADIUS = 4;
 const PHEROMONE_RADIUS = 2;
 const PHEROMONE_DECAY = 0.995;
 const PHEROMONE_DROP_RATE = 0.8;
-const PHEROMONE_FOLLOW_CHANCE = 0.7;
 const PHEROMONE_ERROR = 0.18;
-const ANT_SPEED = 1.2;
-const ANT_TURN_ANGLE = 0.35;
 const MEMORY_DURATION = 480; // moves
 const FOOD_AMOUNT = 60;
 const SENSE_RADIUS = 90;
@@ -72,7 +76,6 @@ const SENSE_ANGLE = 120;
 let ants: Ant[] = [];
 let pheromones: Pheromone[] = [];
 let foodSources: FoodSource[] = [];
-let obstacles: Obstacle[] = [];
 let home = { x: 0, y: 0, foodDeposited: 0 };
 let animationId: number | null = null;
 
@@ -98,7 +101,7 @@ function randomPos(radius: number) {
   };
 }
 
-function resetSimulation(numAnts: number, numFood: number, numObstacles: number) {
+function resetSimulation(numAnts: number, numFood: number) {
   // Generate home at a random position
   let homePos;
   let tries = 0;
@@ -140,39 +143,10 @@ function resetSimulation(numAnts: number, numFood: number, numObstacles: number)
     amount = Math.floor(Math.random() * (100 - 30 + 1)) + 30; // random between 30 and 100
     return { ...pos, amount };
   });
-  // Generate obstacles
-  obstacles = Array.from({ length: numObstacles }, () => {
-    let pos: { x: number; y: number };
-    let radius: number;
-    let tries = 0;
-    do {
-      radius = Math.random() * 30 + 20; // radius 20-50
-      pos = randomPos(radius);
-      tries++;
-    } while (
-      (Math.hypot(pos.x - home.x, pos.y - home.y) < HOME_RADIUS + radius + 20 ||
-      foodSources.some(f => Math.hypot(pos.x - f.x, pos.y - f.y) < FOOD_RADIUS + radius + 10) ||
-      obstacles.some(o => Math.hypot(pos.x - o.x, pos.y - o.y) < o.radius + radius + 10)) && tries < 30
-    );
-    return { x: pos.x, y: pos.y, radius };
-  });
 }
 
 function drawWorld(ctx: CanvasRenderingContext2D) {
   ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-  // Draw obstacles (draw under everything)
-  for (const obs of obstacles) {
-    const obsCanvas = toCanvasCoords(obs.x, obs.y);
-    ctx.beginPath();
-    ctx.arc(obsCanvas.x, obsCanvas.y, obs.radius, 0, Math.PI * 2);
-    ctx.fillStyle = '#444';
-    ctx.globalAlpha = 0.7;
-    ctx.fill();
-    ctx.globalAlpha = 1.0;
-    ctx.strokeStyle = '#222';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  }
   // Draw pheromones (draw first, so they are under everything)
   if (showPheromones) {
     for (const p of pheromones) {
@@ -278,8 +252,6 @@ function updateAnts() {
       }
     }
     const searchType = ant.hasFood ? 'home' : 'food';
-    // Track if ant sees home in FOV this step
-    let sawHomeThisStep = false;
     // 1. If ant has food and home is in FOV, turn toward home (priority)
     let didPriorityTurn = false;
     if (ant.hasFood) {
@@ -298,7 +270,6 @@ function updateAnts() {
           // Instantly set angle toward home
           ant.angle = angleToHomeNorm;
           didPriorityTurn = true;
-          sawHomeThisStep = true;
           // Always refresh home memory if ant does NOT remember food
           if (!ant.memory.food) {
             ant.memory.home = { x: home.x, y: home.y };
@@ -482,28 +453,6 @@ function updateAnts() {
       ant.lastPheromoneType = undefined;
     }
 
-    // Check if ant is inside any obstacle (not just about to move in)
-    let insideObstacle = null;
-    for (const obs of obstacles) {
-      const dist = Math.hypot(ant.x - obs.x, ant.y - obs.y);
-      if (dist < obs.radius + ANT_RADIUS - 1) { // -1 for tolerance
-        insideObstacle = obs;
-        break;
-      }
-    }
-    if (insideObstacle) {
-      // Move ant outward from obstacle center
-      const dx = ant.x - insideObstacle.x;
-      const dy = ant.y - insideObstacle.y;
-      const dist = Math.hypot(dx, dy) || 1;
-      // Nudge ant just outside the obstacle
-      ant.x = insideObstacle.x + (dx / dist) * (insideObstacle.radius + ANT_RADIUS + 1);
-      ant.y = insideObstacle.y + (dy / dist) * (insideObstacle.radius + ANT_RADIUS + 1);
-      // Turn away from obstacle
-      ant.angle = Math.atan2(dy, dx) * (180 / Math.PI) + randomBetween(-60, 60);
-      continue; // Skip rest of logic for this ant this frame
-    }
-
     // Only randomize direction if not following pheromones or food/home
     if (!didPriorityTurn && !followingPheromone && !ant.followingPheromone) {
       ant.directionChangeTimer--;
@@ -563,39 +512,9 @@ function updateAnts() {
       if (newY < -CANVAS_HEIGHT / 2) { newY = -CANVAS_HEIGHT / 2; }
       if (newY > CANVAS_HEIGHT / 2) { newY = CANVAS_HEIGHT / 2; }
     }
-    // Obstacle collision: if new position is inside any obstacle, slide along the obstacle
-    let collided = false;
-    for (const obs of obstacles) {
-      const dist = Math.hypot(newX - obs.x, newY - obs.y);
-      if (dist < obs.radius + ANT_RADIUS) {
-        // Compute vector from obstacle center to ant
-        const dx = newX - obs.x;
-        const dy = newY - obs.y;
-        // Tangent directions (perpendicular to radius vector)
-        const tangent1 = Math.atan2(dy, dx) + Math.PI / 2;
-        const tangent2 = Math.atan2(dy, dx) - Math.PI / 2;
-        // Convert current angle to radians
-        const antAngleRad = ant.angle * Math.PI / 180;
-        // Choose tangent closest to current direction
-        const diff1 = Math.abs(Math.atan2(Math.sin(tangent1 - antAngleRad), Math.cos(tangent1 - antAngleRad)));
-        const diff2 = Math.abs(Math.atan2(Math.sin(tangent2 - antAngleRad), Math.cos(tangent2 - antAngleRad)));
-        let slideAngle;
-        if (diff1 < diff2) {
-          slideAngle = tangent1;
-        } else {
-          slideAngle = tangent2;
-        }
-        // Add a small random perturbation to avoid getting stuck
-        slideAngle += randomBetween(-0.2, 0.2);
-        ant.angle = slideAngle * 180 / Math.PI;
-        collided = true;
-        break;
-      }
-    }
-    if (!collided) {
-      ant.x = newX;
-      ant.y = newY;
-    }
+    
+    ant.x = newX;
+    ant.y = newY;
   }
 }
 
@@ -646,8 +565,12 @@ function updatePheromones() {
 }
 
 function animate(ctx: CanvasRenderingContext2D) {
-  updateAnts();
-  updatePheromones();
+  // Run multiple simulation steps based on speed multiplier
+  for (let i = 0; i < currentSpeedMultiplier; i++) {
+    updateAnts();
+    updatePheromones();
+  }
+  
   drawWorld(ctx);
   animationId = requestAnimationFrame(() => animate(ctx));
 }
@@ -655,8 +578,7 @@ function animate(ctx: CanvasRenderingContext2D) {
 function startSimulation() {
   const numAnts = parseInt((document.getElementById('num-ants') as HTMLInputElement).value, 10);
   const numFood = parseInt((document.getElementById('num-food') as HTMLInputElement).value, 10);
-  const numObstacles = parseInt((document.getElementById('num-obstacles') as HTMLInputElement).value, 10) || 0;
-  resetSimulation(numAnts, numFood, numObstacles);
+  resetSimulation(numAnts, numFood);
   const canvas = document.getElementById('sim-canvas') as HTMLCanvasElement;
   const ctx = canvas.getContext('2d')!;
   if (animationId) cancelAnimationFrame(animationId);
@@ -666,7 +588,7 @@ function startSimulation() {
 const startBtn = document.getElementById('start-sim') as HTMLButtonElement;
 startBtn.addEventListener('click', startSimulation);
 
-// Add event listener for adding food sources or obstacles interactively
+// Add event listener for adding food sources interactively
 const canvas = document.getElementById('sim-canvas') as HTMLCanvasElement;
 canvas.addEventListener('click', async (event) => {
   // Get click position relative to canvas
@@ -675,23 +597,11 @@ canvas.addEventListener('click', async (event) => {
   const canvasY = event.clientY - rect.top;
   // Convert to simulation coordinates (center-based)
   const pos = fromCanvasCoords(canvasX, canvasY);
-  // Ask user what to add
-  const what = window.prompt('Add (f)ood or (o)bstacle? Enter f or o:', 'f');
-  if (!what) return;
-  if (what.toLowerCase() === 'f') {
-    // Show prompt dialog for food size
-    const sizeStr = window.prompt('Enter food size (any positive integer):', '60');
-    if (sizeStr === null) return; // Cancelled
-    const size = parseInt(sizeStr, 10);
-    if (isNaN(size) || size < 1) return; // Invalid input
-    // No upper clamp, allow any positive integer
-    foodSources.push({ x: pos.x, y: pos.y, amount: size });
-  } else if (what.toLowerCase() === 'o') {
-    // Prompt for obstacle radius
-    const radiusStr = window.prompt('Enter obstacle radius (20-80):', '30');
-    if (radiusStr === null) return;
-    const radius = parseInt(radiusStr, 10);
-    if (isNaN(radius) || radius < 5 || radius > 120) return;
-    obstacles.push({ x: pos.x, y: pos.y, radius });
-  }
+  // Show prompt dialog for food size
+  const sizeStr = window.prompt('Enter food size (any positive integer):', '60');
+  if (sizeStr === null) return; // Cancelled
+  const size = parseInt(sizeStr, 10);
+  if (isNaN(size) || size < 1) return; // Invalid input
+  // No upper clamp, allow any positive integer
+  foodSources.push({ x: pos.x, y: pos.y, amount: size });
 });
