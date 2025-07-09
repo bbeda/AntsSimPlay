@@ -1,7 +1,4 @@
 import './style.css'
-import typescriptLogo from './typescript.svg'
-import viteLogo from '/vite.svg'
-import { setupCounter } from './counter.ts'
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div style="max-width: 800px; margin: auto;">
@@ -60,10 +57,7 @@ const ANT_RADIUS = 4;
 const PHEROMONE_RADIUS = 2;
 const PHEROMONE_DECAY = 0.995;
 const PHEROMONE_DROP_RATE = 0.8;
-const PHEROMONE_FOLLOW_CHANCE = 0.7;
 const PHEROMONE_ERROR = 0.18;
-const ANT_SPEED = 1.2;
-const ANT_TURN_ANGLE = 0.35;
 const MEMORY_DURATION = 480; // moves
 const FOOD_AMOUNT = 60;
 const SENSE_RADIUS = 90;
@@ -278,8 +272,6 @@ function updateAnts() {
       }
     }
     const searchType = ant.hasFood ? 'home' : 'food';
-    // Track if ant sees home in FOV this step
-    let sawHomeThisStep = false;
     // 1. If ant has food and home is in FOV, turn toward home (priority)
     let didPriorityTurn = false;
     if (ant.hasFood) {
@@ -298,7 +290,6 @@ function updateAnts() {
           // Instantly set angle toward home
           ant.angle = angleToHomeNorm;
           didPriorityTurn = true;
-          sawHomeThisStep = true;
           // Always refresh home memory if ant does NOT remember food
           if (!ant.memory.food) {
             ant.memory.home = { x: home.x, y: home.y };
