@@ -1,11 +1,12 @@
 import './style.css'
-import typescriptLogo from './typescript.svg'
-import viteLogo from '/vite.svg'
-import { setupCounter } from './counter.ts'
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div style="max-width: 800px; margin: auto;">
     <h1>Ant Colony Simulator</h1>
+    <div style="margin-bottom: 1em;">
+      <label>Simulation Speed: <input id="speed-slider" type="range" min="0" max="4" value="0" style="width: 200px;" /></label>
+      <span id="speed-display" style="margin-left: 0.5em; font-weight: bold;">1x</span>
+    </div>
     <div style="margin-bottom: 1em;">
       <label>Number of Ants: <input id="num-ants" type="number" min="1" max="500" value="50" /></label>
       <label style="margin-left: 1em;">Number of Food Sources: <input id="num-food" type="number" min="1" max="10" value="3" /></label>
@@ -30,6 +31,18 @@ let showPheromones = true;
 const pheromoneToggle = document.getElementById('pheromone-toggle') as HTMLInputElement;
 pheromoneToggle.addEventListener('change', () => {
   showPheromones = pheromoneToggle.checked;
+});
+
+// Speed control
+let simulationSpeed = 1;
+const speedValues = [1, 2, 3, 5, 10];
+const speedSlider = document.getElementById('speed-slider') as HTMLInputElement;
+const speedDisplay = document.getElementById('speed-display') as HTMLSpanElement;
+
+speedSlider.addEventListener('input', () => {
+  const index = parseInt(speedSlider.value, 10);
+  simulationSpeed = speedValues[index];
+  speedDisplay.textContent = `${simulationSpeed}x`;
 });
 
 type Pheromone = { x: number; y: number; strength: number; type: 'home' | 'food' };
@@ -60,10 +73,7 @@ const ANT_RADIUS = 4;
 const PHEROMONE_RADIUS = 2;
 const PHEROMONE_DECAY = 0.995;
 const PHEROMONE_DROP_RATE = 0.8;
-const PHEROMONE_FOLLOW_CHANCE = 0.7;
 const PHEROMONE_ERROR = 0.18;
-const ANT_SPEED = 1.2;
-const ANT_TURN_ANGLE = 0.35;
 const MEMORY_DURATION = 480; // moves
 const FOOD_AMOUNT = 60;
 const SENSE_RADIUS = 90;
@@ -278,8 +288,6 @@ function updateAnts() {
       }
     }
     const searchType = ant.hasFood ? 'home' : 'food';
-    // Track if ant sees home in FOV this step
-    let sawHomeThisStep = false;
     // 1. If ant has food and home is in FOV, turn toward home (priority)
     let didPriorityTurn = false;
     if (ant.hasFood) {
@@ -298,7 +306,6 @@ function updateAnts() {
           // Instantly set angle toward home
           ant.angle = angleToHomeNorm;
           didPriorityTurn = true;
-          sawHomeThisStep = true;
           // Always refresh home memory if ant does NOT remember food
           if (!ant.memory.food) {
             ant.memory.home = { x: home.x, y: home.y };
@@ -646,8 +653,11 @@ function updatePheromones() {
 }
 
 function animate(ctx: CanvasRenderingContext2D) {
-  updateAnts();
-  updatePheromones();
+  // Run simulation logic multiple times based on speed setting
+  for (let i = 0; i < simulationSpeed; i++) {
+    updateAnts();
+    updatePheromones();
+  }
   drawWorld(ctx);
   animationId = requestAnimationFrame(() => animate(ctx));
 }
